@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: ddos-detector
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: false   # GitHub Actions triggers the deploy after tests pass

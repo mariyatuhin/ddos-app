@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDoS Detector</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2433; --muted:#667085; --line:#d9dde5;
+          --ok:#2a9d8f; --bad:#e63946; --accent:#264653; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161d; --card:#1b212b; --text:#e8ebf0; --muted:#98a2b3; --line:#2d3644; --accent:#7fc8d8; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  p.sub { margin: 0 0 20px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  label { display:block; font-size: .8rem; color: var(--muted); margin-bottom: 4px; }
+  input { width:100%; padding: 8px 10px; border:1px solid var(--line); border-radius: 8px;
+          background: var(--bg); color: var(--text); font-size: .95rem; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top: 16px; }
+  button { padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--card);
+           color: var(--text); cursor: pointer; font-size: .95rem; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  @media (prefers-color-scheme: dark) { button.primary { color:#12161d; } }
+  #result { font-size: 1.3rem; font-weight: 600; }
+  .BENIGN { color: var(--ok); } .DDoS { color: var(--bad); }
+  .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; margin-top: 10px; }
+  .bar > div { height: 100%; background: var(--bad); width: 0; transition: width .3s; }
+  #banner { display:none; border-color: var(--bad); color: var(--bad); }
+  small { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>DDoS Detector</h1>
+  <p class="sub">Enter network flow features and the model predicts whether the flow is BENIGN or a DDoS attack.</p>
+
+  <div id="banner" class="card"></div>
+
+  <div class="card">
+    <div id="fields" class="grid"></div>
+    <div class="row">
+      <button class="primary" id="predictBtn">Predict</button>
+      <button id="exAttack" style="display:none">Load DDoS example</button>
+      <button id="exBenign" style="display:none">Load BENIGN example</button>
+    </div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <div id="result"></div>
+    <div class="bar"><div id="probBar"></div></div>
+    <small id="probText"></small>
+  </div>
+
+  <small id="metrics"></small>
+</main>
+
+<script>
+let FEATURES = [];
+let EXAMPLES = {};
+
+const $ = (id) => document.getElementById(id);
+
+function showBanner(msg) { const b = $("banner"); b.textContent = msg; b.style.display = "block"; }
+
+function fillForm(values) {
+  FEATURES.forEach((f, i) => { $("f" + i).value = values[f] ?? ""; });
+}
+
+async function init() {
+  const res = await fetch("/features");
+  if (!res.ok) { showBanner("Model not loaded on the server. Run train.py and redeploy."); $("predictBtn").disabled = true; return; }
+  const data = await res.json();
+  FEATURES = data.features;
+  EXAMPLES = data.examples || {};
+
+  $("fields").innerHTML = FEATURES.map((f, i) =>
+    `<div><label for="f${i}">${f}</label><input id="f${i}" type="number" step="any" value="0"></div>`).join("");
+
+  if (EXAMPLES.DDoS) { $("exAttack").style.display = ""; $("exAttack").onclick = () => fillForm(EXAMPLES.DDoS); }
+  if (EXAMPLES.BENIGN) { $("exBenign").style.display = ""; $("exBenign").onclick = () => fillForm(EXAMPLES.BENIGN); }
+  if (data.metrics && data.metrics.F1 !== undefined) {
+    $("metrics").textContent = `Model test scores: accuracy ${data.metrics.Accuracy}, F1 ${data.metrics.F1}, ROC-AUC ${data.metrics["ROC-AUC"]}`;
+  }
+}
+
+async function predict() {
+  const features = {};
+  for (let i = 0; i < FEATURES.length; i++) {
+    const v = parseFloat($("f" + i).value);
+    if (Number.isNaN(v)) { alert("Please fill every field with a number: " + FEATURES[i]); return; }
+    features[FEATURES[i]] = v;
+  }
+  const res = await fetch("/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ features }) });
+  const out = await res.json();
+  if (!res.ok) { alert(out.detail || "Prediction failed"); return; }
+  $("resultCard").style.display = "block";
+  $("result").innerHTML = `Prediction: <span class="${out.label}">${out.label}</span>`;
+  $("probBar").style.width = (out.prob_ddos * 100) + "%";
+  $("probText").textContent = `P(DDoS) = ${(out.prob_ddos * 100).toFixed(2)}%   |   P(BENIGN) = ${(out.prob_benign * 100).toFixed(2)}%`;
+}
+
+$("predictBtn").onclick = predict;
+init();
+</script>
+</body>
+</html>
